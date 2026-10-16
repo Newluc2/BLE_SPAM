@@ -8,7 +8,7 @@
 // Documentation at https://learn.microsoft.com/en-us/windows-hardware/design/component-guidelines/bluetooth-swift-pair
 
 static char names[256][sizeof(((SwiftpairCfg*)0)->name)];
-static uint8_t names_count = 0;
+static size_t names_count = 0;
 
 static const char* get_name(const Payload* payload) {
     UNUSED(payload);
@@ -31,7 +31,7 @@ static const char* random_name() {
             while(stream_read_line(stream, line)) {
                 furi_string_replace_all(line, "\r", "");
                 furi_string_replace_all(line, "\n", "");
-                if(furi_string_size(line)) {
+                if(furi_string_size(line) && names_count < COUNT_OF(names)) {
                     strlcpy(names[names_count++], furi_string_get_cstr(line), sizeof(names[0]));
                 }
             }
@@ -63,10 +63,18 @@ static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
         name = cfg->name;
         break;
     }
-    uint8_t name_len = strlen(name);
+    size_t name_len = strlen(name);
+    if(name_len > MAX_BLE_PACKET_SIZE - 7) {
+        name_len = MAX_BLE_PACKET_SIZE - 7;
+    }
 
-    uint8_t size = 7 + name_len;
+    uint8_t size = (uint8_t)(7 + name_len);
     uint8_t* packet = malloc(size);
+    if(!packet) {
+        *_size = 0;
+        *_packet = NULL;
+        return;
+    }
     uint8_t i = 0;
 
     // Windows 11+ optimized SwiftPair BLE advertisement

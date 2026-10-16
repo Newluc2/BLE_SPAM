@@ -3,14 +3,14 @@ App(
     name="BLE Spam by N",
     apptype=FlipperAppType.EXTERNAL,
     entry_point="ble_spam",
-    stack_size=4 * 1024,  # ✅ FIXED: Increased from 2KB to 4KB for stability
+    requires=["gui", "bt"],
+    stack_size=4 * 1024,
     fap_icon="ble_spam_10px.png",
     fap_category="Bluetooth",
     fap_icon_assets="icons",
-    fap_icon_assets_symbol="ble_spam",
-    fap_file_assets="assets",
+    resources="assets",
     fap_author="WillyJL & ECTO-1A & Spooks4576",
     fap_weburl="https://github.com/Next-Flip/Momentum-Apps/tree/dev/ble_spam",
-    fap_version="7.0",  # ✅ FIXED: Version bump to 7.0 - Production Ready
-    fap_description="Multi-platform BLE spam: iOS (85%+), Android (90%+), Windows (75%+) - Stable & optimized",
+    fap_version="7.1",
+    fap_description="BLE advertisement compatibility test utility for Flipper Zero",
 )

@@ -9,6 +9,10 @@
 #include <core/core_defines.h>
 #include "../ble_spam.h"
 
+#ifndef MAX_BLE_PACKET_SIZE
+#define MAX_BLE_PACKET_SIZE 31
+#endif
+
 typedef struct Payload Payload;
 
 typedef struct {

@@ -97,6 +97,11 @@ static void make_packet(uint8_t* out_size, uint8_t** out_packet, Payload* payloa
 
     uint8_t size = packet_sizes[type];
     uint8_t* packet = malloc(size);
+    if(!packet) {
+        *out_size = 0;
+        *out_packet = NULL;
+        return;
+    }
     uint8_t i = 0;
 
     switch(type) {

@@ -1,15 +1,14 @@
 #!/usr/bin/env pwsh
-# BLE Spam v7.0 - Compilation script for Windows
+# BLE Spam v7.1 - Compilation script for Windows
 
-$ProjectDir = "c:\Users\Lucas\Downloads\Flipper\ble_spam"
-$SdkDir = "C:\flipperzero-firmware"
-$BuildDir = "$ProjectDir\build"
+$ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot ".")).Path
+$SdkDir = if ($env:FLIPPER_SDK) { $env:FLIPPER_SDK } else { "C:\flipperzero-firmware" }
+$BuildDir = $SdkDir
 $OutputDir = "$ProjectDir\dist"
-$Toolchain = "$SdkDir\toolchain\x86_64-windows\bin"
 
 Write-Host @"
 ╔════════════════════════════════════════════════════════════════╗
-║          BLE SPAM v7.0 - COMPILATION                           ║
+║          BLE SPAM v7.1 - COMPILATION                           ║
 ║          Flipper Zero Production Build                          ║
 ╚════════════════════════════════════════════════════════════════╝
 
@@ -23,63 +22,34 @@ Write-Host "[*] Build directory: $BuildDir" -ForegroundColor Yellow
 Write-Host "[*] Output directory: $OutputDir" -ForegroundColor Yellow
 Write-Host ""
 
-# Verify compiler exists
-$CompilerPath = "$Toolchain\arm-none-eabi-gcc.exe"
-if (-not (Test-Path $CompilerPath)) {
-    Write-Host "❌ ERROR: ARM compiler not found!" -ForegroundColor Red
-    Write-Host "   Expected: $CompilerPath" -ForegroundColor Red
-    Write-Host "   Please install Flipper SDK first!" -ForegroundColor Red
+# Verify FBT exists
+$FbtPath = Join-Path $SdkDir "fbt"
+if (-not (Test-Path $FbtPath)) {
+    Write-Host "❌ ERROR: Flipper firmware fbt not found!" -ForegroundColor Red
+    Write-Host "   Expected: $FbtPath" -ForegroundColor Red
     Read-Host "Press Enter to exit"
     exit 1
 }
 
-Write-Host "✅ Compiler found: $CompilerPath" -ForegroundColor Green
+Write-Host "✅ FBT found: $FbtPath" -ForegroundColor Green
 Write-Host ""
 
-# Go to build directory
-Set-Location $BuildDir
-
-# Step 1: Configure CMake
-Write-Host "[1/3] Configuring CMake..." -ForegroundColor Cyan
-$ToolchainFile = "$SdkDir\cmake\gnu_arm_toolchain.cmake"
-
-if (-not (Test-Path $ToolchainFile)) {
-    Write-Host "❌ ERROR: Toolchain file not found: $ToolchainFile" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-$cmakeArgs = @(
-    "..",
-    "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile",
-    "-DCMAKE_BUILD_TYPE=Release",
-    "-DBUILD_FAP=ON"
-)
-
-cmake @cmakeArgs
+# Build with the official Flipper Build Tool
+Write-Host "[1/2] Building FAP with FBT..." -ForegroundColor Cyan
+Set-Location $SdkDir
+python .\fbt fap_ble_spam "APPSRC=$ProjectDir"
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ ERROR: CMake configuration failed!" -ForegroundColor Red
+    Write-Host "❌ ERROR: FBT build failed!" -ForegroundColor Red
     Read-Host "Press Enter to exit"
     exit 1
 }
 
-Write-Host "✅ CMake configured successfully" -ForegroundColor Green
+Write-Host "✅ FBT build successful" -ForegroundColor Green
 Write-Host ""
 
-# Step 2: Compile
-Write-Host "[2/3] Compiling..." -ForegroundColor Cyan
-cmake --build . --config Release -j 4
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ ERROR: Compilation failed!" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-Write-Host "✅ Compilation successful" -ForegroundColor Green
-Write-Host ""
-
-# Step 3: Find and copy .fap
-Write-Host "[3/3] Packaging FAP..." -ForegroundColor Cyan
+$BuildDir = $SdkDir
+# Find and copy .fap
+Write-Host "[2/2] Packaging FAP..." -ForegroundColor Cyan
 
 $FapFile = Get-ChildItem -Path $BuildDir -Recurse -Filter "ble_spam.fap" -ErrorAction SilentlyContinue | Select-Object -First 1
 
@@ -104,12 +74,10 @@ Size: $([math]::Round($FapFile.Length / 1MB, 2)) MB
 4. Install on Flipper
 5. Launch: Apps → Bluetooth → BLE Spam
 
-✨ v7.0 Features:
-   ✅ iOS: 85%+ effectiveness (+55%)
-   ✅ Android: 90%+ effectiveness (+30%)
-   ✅ Windows: 75%+ effectiveness (+65%)
-   ✅ Stable: 95%+ uptime
-   ✅ No crashes (<1% crash rate)
+✨ v7.1:
+   ✅ Built with the official Flipper Build Tool
+   ✅ Manifest dependencies declared
+   ✅ SD-card resources packaged correctly
 
 🎉 Ready to deploy!
 "@ -ForegroundColor Green

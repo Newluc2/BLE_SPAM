@@ -6,14 +6,9 @@
 
 #include "protocols/_protocols.h"
 
-// Security hardening macros
+#ifndef MAX_BLE_PACKET_SIZE
 #define MAX_BLE_PACKET_SIZE 31
-#define SAFE_MALLOC(size) \
-    ({ \
-        void* _ptr = malloc(size); \
-        furi_check(_ptr != NULL); \
-        _ptr; \
-    })
+#endif
 
 // Hacked together by @WillyJL
 // Custom adv API by @WillyJL (idea by @xMasterX)
@@ -157,49 +152,48 @@ static Attack attacks[] = {
 
 #define ATTACKS_COUNT ((signed)COUNT_OF(attacks))
 
-// ✅ FIXED: Adaptive delays per platform for optimal compatibility
-// iOS requires longer delays to avoid CPU throttling (80ms+)
-// Android needs balanced timing (60ms for GMS compatibility)  
-// Windows requires stable intervals (100ms for GATT stability)
-static uint16_t delays[] = {20, 30, 50, 100, 150};
+// Compatibility-first advertising intervals. Very short intervals are rejected
+// or throttled by some phones and increase power consumption without improving
+// discovery reliability.
+static const uint16_t delays[] = {100, 150, 250, 500, 1000};
 
-// Platform-specific optimal delays - FIXED v7.0
+// Platform-specific conservative defaults for reliable discovery.
 typedef struct {
-    uint16_t ios;           // Apple devices: 80ms (avoid throttling)
-    uint16_t android;       // Android 13+: 60ms (GMS compatibility)
-    uint16_t windows;       // Windows 11+: 100ms (GATT stability)
-    uint16_t default_delay; // Fallback: 60ms (safe default)
+    uint16_t ios;
+    uint16_t android;
+    uint16_t windows;
+    uint16_t default_delay;
 } PlatformTimings;
 
 static const PlatformTimings platform_timings = {
-    .ios = 80,              // ✅ Prevents iOS CPU throttling
-    .android = 60,          // ✅ Improves GMS detection rate
-    .windows = 100,         // ✅ Ensures GATT timeout recovery
-    .default_delay = 60,    // ✅ Safe default for unknown platforms
+    .ios = 250,
+    .android = 150,
+    .windows = 250,
+    .default_delay = 250,
 };
 
 // Detect target platform and return optimal delay
 static uint16_t get_optimal_delay_for_protocol(const Protocol* protocol) {
     if(!protocol) return platform_timings.default_delay;
     
-    // iOS Continuity detected - use longer delays to prevent throttling
+    // Apple devices benefit from a slower, stable advertising cadence.
     if(protocol == &protocol_continuity) {
-        return platform_timings.ios;  // 80ms for Apple compatibility
+        return platform_timings.ios;
     }
-    // Android FastPair detected - balanced timing
+    // Android discovery remains responsive at a moderate cadence.
     else if(protocol == &protocol_fastpair || protocol == &protocol_easysetup) {
-        return platform_timings.android;  // 60ms for Android GMS
+        return platform_timings.android;
     }
-    // Windows SwiftPair detected - stable timing
+    // Windows Swift Pair benefits from a stable, non-burst cadence.
     else if(protocol == &protocol_swiftpair) {
-        return platform_timings.windows;  // 100ms for Windows stability
+        return platform_timings.windows;
     }
-    // Generic/Name flooding - use safe default
+    // Generic advertisements use the conservative fallback.
     else if(protocol == &protocol_nameflood || protocol == &protocol_lovespouse) {
-        return platform_timings.default_delay;  // 60ms safe default
+        return platform_timings.default_delay;
     }
     
-    return platform_timings.default_delay; // Fallback to safe default
+    return platform_timings.default_delay;
 }
 
 // Validate packet size and content
@@ -208,16 +202,35 @@ static bool validate_and_fix_packet(uint8_t* size, uint8_t* packet) {
     
     // BLE advertising packets max 31 bytes
     if(*size > MAX_BLE_PACKET_SIZE) {
-        FURI_LOG_W("BLE_SPAM", "Packet too large: %d bytes, truncating to 31", *size);
-        *size = MAX_BLE_PACKET_SIZE;
-        return false; // Warn that truncation occurred
+        FURI_LOG_W("BLE_SPAM", "Packet too large: %d bytes", *size);
+        return false;
     }
     
     if(*size == 0) {
         FURI_LOG_E("BLE_SPAM", "Invalid empty packet");
         return false;
     }
-    
+
+    // Validate the AD structure before handing it to the radio driver.
+    // A malformed length can otherwise make the driver read past the buffer.
+    uint8_t offset = 0;
+    while(offset < *size) {
+        uint8_t field_size = packet[offset];
+        if(field_size == 0) {
+            break;
+        }
+        if(field_size > (*size - offset - 1)) {
+            FURI_LOG_W("BLE_SPAM", "Malformed AD field at offset %u", offset);
+            return false;
+        }
+        offset += (uint8_t)(field_size + 1);
+    }
+
+    if(offset != *size && packet[offset] != 0) {
+        FURI_LOG_W("BLE_SPAM", "Incomplete AD packet");
+        return false;
+    }
+
     return true;
 }
 
@@ -273,11 +286,17 @@ static void randomize_mac(State* state) {
     furi_hal_random_fill_buf(state->config.address, sizeof(state->config.address));
 }
 
+static uint32_t random_u32(void) {
+    uint32_t value;
+    furi_hal_random_fill_buf((uint8_t*)&value, sizeof(value));
+    return value;
+}
+
 static void start_extra_beacon(State* state) {
     furi_assert(state);
     
-    uint8_t size;
-    uint8_t* packet;
+    uint8_t size = 0;
+    uint8_t* packet = NULL;
     uint16_t delay = delays[state->delay];
     GapExtraBeaconConfig* config = &state->config;
     Payload* payload = &attacks[state->index].payload;
@@ -288,9 +307,9 @@ static void start_extra_beacon(State* state) {
         delay = get_optimal_delay_for_protocol(protocol);
     }
 
-    // Optimized interval for modern devices (iOS 17+, Android 13+, Windows 11+)
+    // Keep the interval range narrow so scanners do not see bursty traffic.
     config->min_adv_interval_ms = delay;
-    config->max_adv_interval_ms = delay * 1.25; // Reduced variance for better compatibility
+    config->max_adv_interval_ms = delay;
     
     if(payload->random_mac) randomize_mac(state);
     
@@ -304,12 +323,18 @@ static void start_extra_beacon(State* state) {
     if(protocol) {
         protocol->make_packet(&size, &packet, payload);
     } else {
-        protocols[rand() % protocols_count]->make_packet(&size, &packet, NULL);
+        if(protocols_count == 0) {
+            FURI_LOG_E("BLE_SPAM", "No protocols registered");
+            return;
+        }
+        protocols[random_u32() % protocols_count]->make_packet(&size, &packet, NULL);
     }
     
     // SECURITY: Validate packet before transmission
     if(!validate_and_fix_packet(&size, packet)) {
-        FURI_LOG_W("BLE_SPAM", "Packet validation warning for protocol");
+        FURI_LOG_W("BLE_SPAM", "Packet rejected before transmission");
+        free(packet);
+        return;
     }
     
     // SECURITY: Only set valid packets
@@ -354,7 +379,12 @@ static int32_t adv_thread(void* _ctx) {
     }
 
     uint32_t packet_count = 0;
-    while(state->advertising) {
+    while(true) {
+        furi_mutex_acquire(state->advertising_mutex, FuriWaitForever);
+        bool advertising = state->advertising;
+        furi_mutex_release(state->advertising_mutex);
+        if(!advertising) break;
+
         // Advanced bruteforce: accelerated cycling with adaptive timing
         if(protocol && payload->mode == PayloadModeBruteforce) {
             // Cycle through values faster for improved connection discovery
@@ -369,7 +399,9 @@ static int32_t adv_thread(void* _ctx) {
         packet_count++;
 
         // Adaptive delay: faster packets in burst mode
-        uint32_t wait_time = delays[state->delay];
+        uint32_t wait_time = state->use_adaptive_delay ?
+                                 get_optimal_delay_for_protocol(protocol) :
+                                 delays[state->delay];
         furi_thread_flags_wait(true, FuriFlagWaitAny, wait_time);
         
         // ✅ FIXED: Graceful error handling for beacon stop
@@ -798,20 +830,25 @@ int32_t ble_spam(void* p) {
     bool prev_active = furi_hal_bt_extra_beacon_is_active();
 
     State* state = malloc(sizeof(State));
+    furi_check(state);
+    memset(state, 0, sizeof(State));
+    state->index = PageStart;
+    state->delay = 0;
     state->config.adv_channel_map = GapAdvChannelMapAll;
     state->config.adv_power_level = GapAdvPowerLevel_6dBm;
     state->config.address_type = GapAddressTypePublic;
     state->thread = furi_thread_alloc();
+    furi_check(state->thread);
     furi_thread_set_callback(state->thread, adv_thread);
     furi_thread_set_context(state->thread, state);
-    furi_thread_set_stack_size(state->thread, 2048);
+    furi_thread_set_stack_size(state->thread, 4 * 1024);
     
     // SECURITY: Create mutex for thread-safe advertising state
     state->advertising_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     furi_check(state->advertising_mutex);
     
-    // NEW: Initialize adaptive delay feature
-    state->use_adaptive_delay = false;
+    // Prefer platform-aware timing for compatibility by default.
+    state->use_adaptive_delay = true;
     
     state->ctx.led_indicator = true;
     state->lock_timer = furi_timer_alloc(lock_timer_callback, FuriTimerTypeOnce, state);
@@ -876,6 +913,13 @@ int32_t ble_spam(void* p) {
     furi_record_close(RECORD_GUI);
     furi_record_close(RECORD_NOTIFICATION);
 
+    if(state->advertising) {
+        toggle_adv(state);
+    }
+    if(furi_hal_bt_extra_beacon_is_active()) {
+        furi_hal_bt_extra_beacon_stop();
+    }
+
     furi_timer_free(state->lock_timer);
     furi_thread_free(state->thread);
     
@@ -886,9 +930,6 @@ int32_t ble_spam(void* p) {
     
     free(state);
 
-    if(furi_hal_bt_extra_beacon_is_active()) {
-        furi_check(furi_hal_bt_extra_beacon_stop());
-    }
     if(prev_cfg_ptr) {
         furi_check(furi_hal_bt_extra_beacon_set_config(&prev_cfg));
     }

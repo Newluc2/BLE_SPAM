@@ -556,6 +556,11 @@ static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
 
     uint8_t size = 14;
     uint8_t* packet = malloc(size);
+    if(!packet) {
+        *_size = 0;
+        *_packet = NULL;
+        return;
+    }
     uint8_t i = 0;
 
     // Service UUID advertisement (Google FastPair)

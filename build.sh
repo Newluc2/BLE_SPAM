@@ -1,13 +1,12 @@
 #!/bin/bash
 # Build script for BLE Spam FAP (Flipper Application Package)
 # Tested on: Ubuntu 20.04 LTS, macOS 11+, WSL2 Windows
-# Requires: FDT (Flipper Development Toolkit)
+# Requires: a Flipper firmware checkout with FBT
 
 set -e  # Exit on error
 
 PROJECT_NAME="ble_spam"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$PROJECT_DIR/build"
 DIST_DIR="$PROJECT_DIR/dist"
 
 echo "=================================================="
@@ -16,38 +15,31 @@ echo "=================================================="
 echo ""
 echo "📁 Project: $PROJECT_NAME"
 echo "📂 Source:  $PROJECT_DIR"
-echo "🏗️  Build:   $BUILD_DIR"
+echo "🏗️  Firmware: $FLIPPER_DEV_TOOLS"
 echo ""
 
-# Clean previous build
-if [ -d "$BUILD_DIR" ]; then
-    echo "🧹 Cleaning previous build..."
-    rm -rf "$BUILD_DIR"
-fi
-
-# Create build directories
-mkdir -p "$BUILD_DIR"
 mkdir -p "$DIST_DIR"
 
-# Build with CMake (requires FDT)
+# Build with the official Flipper Build Tool (FBT).
+if [ -z "${FLIPPER_DEV_TOOLS:-}" ] || [ ! -f "$FLIPPER_DEV_TOOLS/fbt" ]; then
+    echo "❌ FLIPPER_DEV_TOOLS must point to a Flipper firmware checkout."
+    exit 1
+fi
+
 echo "🔨 Building FAP..."
-cd "$BUILD_DIR"
-
-cmake .. \
-    -DCMAKE_TOOLCHAIN_FILE="$FLIPPER_DEV_TOOLS/cmake/gnu_arm_toolchain.cmake" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_FAP=ON
-
-make -j$(nproc) || make -j4
+cd "$FLIPPER_DEV_TOOLS"
+./fbt fap_ble_spam "APPSRC=$PROJECT_DIR"
 
 # Check if build succeeded
-if [ -f "$BUILD_DIR/$PROJECT_NAME.fap" ]; then
+FAP_FILE="$(find "$FLIPPER_DEV_TOOLS" -type f -name "$PROJECT_NAME.fap" -print -quit)"
+if test -n "$FAP_FILE"
+then
     echo ""
     echo "✅ Build successful!"
-    echo "📦 Package: $BUILD_DIR/$PROJECT_NAME.fap"
+    echo "📦 Package: $DIST_DIR/$PROJECT_NAME.fap"
     
     # Copy to dist
-    cp "$BUILD_DIR/$PROJECT_NAME.fap" "$DIST_DIR/$PROJECT_NAME.fap"
+    cp "$FAP_FILE" "$DIST_DIR/$PROJECT_NAME.fap"
     
     # Show file info
     ls -lh "$DIST_DIR/$PROJECT_NAME.fap"

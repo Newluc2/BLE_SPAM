@@ -4,11 +4,10 @@ REM Flipper Zero - Windows
 
 setlocal enabledelayedexpansion
 
-set PROJECT_DIR=c:\Users\Lucas\Downloads\Flipper\ble_spam
-set SDK_DIR=C:\flipperzero-firmware
-set BUILD_DIR=%PROJECT_DIR%\build
+set "PROJECT_DIR=%~dp0"
+set "SDK_DIR=%FLIPPER_SDK%"
+if not defined SDK_DIR set "SDK_DIR=C:\flipperzero-firmware"
 set OUTPUT_DIR=%PROJECT_DIR%\dist
-set TOOLCHAIN=%SDK_DIR%\toolchain\x86_64-windows\bin
 
 echo.
 echo ================================================
@@ -17,50 +16,35 @@ echo ================================================
 echo.
 
 REM Create build directories
-if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-cd /d "%BUILD_DIR%"
-
-REM Check compiler
-if not exist "%TOOLCHAIN%\arm-none-eabi-gcc.exe" (
-    echo ERROR: ARM compiler not found!
-    echo Path: %TOOLCHAIN%\arm-none-eabi-gcc.exe
+REM Check FBT
+if not exist "%SDK_DIR%\fbt" (
+    echo ERROR: Flipper firmware fbt not found!
+    echo Path: %SDK_DIR%\fbt
     pause
     exit /b 1
 )
 
-echo [*] Compiler found: %TOOLCHAIN%\arm-none-eabi-gcc.exe
-echo [*] Building BLE Spam v7.0...
+echo [*] FBT found: %SDK_DIR%\fbt
+echo [*] Building BLE Spam v7.1...
 echo.
 
-REM Run CMake
-echo [1/3] Configuring CMake...
-cmake .. -DCMAKE_TOOLCHAIN_FILE="%SDK_DIR%\cmake\gnu_arm_toolchain.cmake" ^
-         -DCMAKE_BUILD_TYPE=Release ^
-         -DBUILD_FAP=ON
+cd /d "%SDK_DIR%"
+echo [1/2] Building with FBT...
+python fbt fap_ble_spam "APPSRC=%PROJECT_DIR%"
 
 if errorlevel 1 (
-    echo ERROR: CMake configuration failed!
+    echo ERROR: FBT build failed!
     pause
     exit /b 1
 )
 
 echo.
-echo [2/3] Compiling...
-cmake --build . --config Release -j 4
-
-if errorlevel 1 (
-    echo ERROR: Compilation failed!
-    pause
-    exit /b 1
-)
-
-echo.
-echo [3/3] Packaging FAP...
+echo [2/2] Packaging FAP...
 
 REM Find and copy .fap file
-for /r "%BUILD_DIR%" %%f in (ble_spam.fap) do (
+for /r "%SDK_DIR%" %%f in (ble_spam.fap) do (
     echo Found: %%f
     copy "%%f" "%OUTPUT_DIR%\ble_spam.fap"
     if exist "%OUTPUT_DIR%\ble_spam.fap" (
@@ -84,7 +68,7 @@ for /r "%BUILD_DIR%" %%f in (ble_spam.fap) do (
 
 echo.
 echo ERROR: .fap file not found in build output!
-echo Checked: %BUILD_DIR%
-dir /s /b "%BUILD_DIR%\*.fap"
+echo Checked: %SDK_DIR%
+dir /s /b "%SDK_DIR%\*.fap"
 pause
 exit /b 1

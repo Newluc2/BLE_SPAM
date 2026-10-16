@@ -262,6 +262,11 @@ static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
 
     uint8_t size = packet_sizes[type];
     uint8_t* packet = malloc(size);
+    if(!packet) {
+        *_size = 0;
+        *_packet = NULL;
+        return;
+    }
     uint8_t i = 0;
 
     // Apple Continuity BLE Advertisement Header
